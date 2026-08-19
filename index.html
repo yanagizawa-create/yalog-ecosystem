@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meu Ecossistema · YALog</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   SPRINT YALOG-ECOSYSTEM-001 — mesmas variáveis/fontes do Design
+   System da Platform (item 4), mas visual deliberadamente mais
+   simples — o cliente não deve sentir que está no admin da YALog.
+   ═══════════════════════════════════════════════════════════════ */
+:root{
+  --bg:#0e0d0b;--bg2:#141210;--bg3:#1c1916;
+  --panel:#181512;--border:rgba(255,255,255,.06);--border2:rgba(255,255,255,.11);
+  --orange:#c94f1a;--orange2:#e8692a;--og:linear-gradient(135deg,#c94f1a,#e8692a);
+  --green:#16a34a;--g2:#4ade80;--red:#dc2626;--r2:#f87171;
+  --w:#faf8f4;--w70:rgba(250,248,244,.7);--w40:rgba(250,248,244,.4);
+  --w15:rgba(250,248,244,.15);--w06:rgba(250,248,244,.06);
+  --serif:'Instrument Serif',serif;--sans:'Syne',sans-serif;--mono:'JetBrains Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--w);font-family:var(--sans);min-height:100vh;}
+.hidden{display:none !important;}
+
+/* ── LOGIN ── */
+#tela-login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+.login-card{width:100%;max-width:380px;padding:40px 34px;background:var(--panel);border:1px solid var(--border2);}
+.login-brand{font-family:var(--serif);font-style:italic;font-size:28px;text-align:center;}
+.login-sub{text-align:center;font-family:var(--mono);font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--orange2);margin-top:4px;margin-bottom:6px;}
+.login-tag{text-align:center;font-size:12px;color:var(--w40);margin-bottom:28px;}
+.fg{margin-bottom:14px;}
+.fg label{display:block;font-size:10px;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--w40);margin-bottom:6px;}
+.fg input{width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--w);padding:11px 12px;font-family:var(--sans);font-size:14px;outline:none;}
+.fg input:focus{border-color:var(--orange);}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;cursor:pointer;font-family:var(--sans);font-weight:600;font-size:13px;padding:11px 18px;transition:.15s;}
+.btn:disabled{opacity:.5;cursor:not-allowed;}
+.btn-primary{background:var(--og);color:#fff;}
+.btn-primary:hover:not(:disabled){filter:brightness(1.1);}
+.btn-outline{background:transparent;color:var(--w40);border:1px solid var(--border2);}
+.btn-outline:hover:not(:disabled){border-color:var(--orange);color:var(--orange2);}
+.btn-block{width:100%;}
+.msg-erro{font-size:12px;color:var(--r2);background:rgba(220,38,38,.1);border:1px solid rgba(220,38,38,.25);padding:9px 12px;margin-bottom:14px;display:none;}
+.msg-info{font-size:11px;color:var(--w40);text-align:center;margin-top:16px;}
+.conn-status{text-align:center;font-size:9px;font-family:var(--mono);letter-spacing:.08em;padding:6px;border:1px solid var(--border2);margin-bottom:18px;}
+.conn-status.online{color:var(--g2);border-color:rgba(22,163,74,.3);}
+.conn-status.offline{color:var(--r2);border-color:rgba(220,38,38,.3);}
+
+/* ── APP ── */
+#app{display:none;min-height:100vh;flex-direction:column;}
+header.top{display:flex;align-items:center;justify-content:space-between;padding:16px 28px;border-bottom:1px solid var(--border);background:var(--bg2);}
+.top-brand{font-family:var(--serif);font-style:italic;font-size:20px;}
+.top-brand small{display:block;font-family:var(--mono);font-style:normal;font-size:9px;letter-spacing:.15em;color:var(--orange2);text-transform:uppercase;margin-top:2px;}
+.top-user{display:flex;align-items:center;gap:14px;}
+.top-user-info{text-align:right;}
+.top-user-name{font-size:13px;font-weight:600;}
+.top-user-role{font-size:9px;font-family:var(--mono);color:var(--w40);letter-spacing:.08em;text-transform:uppercase;}
+main{flex:1;padding:32px 28px;max-width:1100px;margin:0 auto;width:100%;}
+.empresa-card{background:var(--panel);border:1px solid var(--border);padding:20px 24px;margin-bottom:32px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;}
+.empresa-nome{font-size:18px;font-weight:700;}
+.empresa-id{font-family:var(--mono);font-size:11px;color:var(--w40);margin-top:2px;}
+.secao-titulo{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--orange);margin-bottom:16px;}
+.grid-modulos{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;}
+.mod-card{background:var(--panel);border:1px solid var(--border);padding:24px 20px;text-align:center;transition:.15s;}
+.mod-card:hover{border-color:var(--border2);}
+.mod-icon{font-size:32px;margin-bottom:10px;}
+.mod-nome{font-weight:700;font-size:15px;margin-bottom:6px;}
+.mod-desc{font-size:11px;color:var(--w40);margin-bottom:10px;min-height:28px;}
+.mod-versao{font-family:var(--mono);font-size:10px;color:var(--w40);margin-bottom:14px;}
+.qs-empty{text-align:center;padding:40px 20px;color:var(--w40);font-size:13px;}
+.qs-empty .btn{margin-top:14px;}
+.loading-dots::after{content:'...';}
+
+@media (max-width:640px){
+  main{padding:20px 16px;}
+  header.top{padding:14px 16px;}
+  .top-user-info{display:none;}
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════ TELA DE LOGIN (item 6) ═══════════ -->
+<div id="tela-login">
+  <div class="login-card">
+    <div class="login-brand">YALog</div>
+    <div class="login-sub">Meu Ecossistema</div>
+    <div class="login-tag">Seu ambiente de soluções YALog.</div>
+    <div class="conn-status" id="connStatus">verificando conexão...</div>
+    <div class="msg-erro" id="loginErro"></div>
+    <div class="fg">
+      <label>ID da Empresa</label>
+      <input id="inCompanyId" placeholder="YLG-XXXXXX" autocomplete="off" oninput="this.value=this.value.toUpperCase().replace(/\s/g,'')" onkeydown="if(event.key==='Enter')document.getElementById('inUsuario').focus()">
+    </div>
+    <div class="fg">
+      <label>Usuário</label>
+      <input id="inUsuario" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('inSenha').focus()">
+    </div>
+    <div class="fg">
+      <label>Senha</label>
+      <input id="inSenha" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')fazerLoginCliente()">
+    </div>
+    <button class="btn btn-primary btn-block" id="btnEntrar" onclick="fazerLoginCliente()">Entrar</button>
+    <div class="msg-info">YALog Platform &middot; ambiente exclusivo de clientes</div>
+  </div>
+</div>
+
+<!-- ═══════════ APP (pós-login) ═══════════ -->
+<div id="app">
+  <header class="top">
+    <div class="top-brand">YALog<small>Meu Ecossistema</small></div>
+    <div class="top-user">
+      <div class="top-user-info">
+        <div class="top-user-name" id="hdrNome">—</div>
+        <div class="top-user-role" id="hdrPerfil">—</div>
+      </div>
+      <button class="btn btn-outline" id="btnSair" onclick="logoutCliente()">Sair</button>
+    </div>
+  </header>
+  <main>
+    <div class="empresa-card">
+      <div>
+        <div class="empresa-nome" id="empNome">—</div>
+        <div class="empresa-id" id="empId">—</div>
+      </div>
+    </div>
+    <div class="secao-titulo">Meus Módulos</div>
+    <div class="grid-modulos" id="gridMeusModulos">
+      <div class="qs-empty">Carregando módulos...</div>
+    </div>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   CONFIGURAÇÃO — mesmo projeto Supabase da Platform/WMS/Pátio (item
+   32). Nunca criar outro projeto, nunca alterar URL/chave.
+   ═══════════════════════════════════════════════════════════════ */
+const SUPABASE_URL = 'https://pyckcyaojztixsujbylq.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_iHBh-BZsjisQc0i09QUDoQ_9mZl1vfk';
+
+let supabaseClient = null;
+let SUPABASE_ONLINE = false;
+try{
+  if(typeof window!=='undefined' && window.supabase && window.supabase.createClient){
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY,
+      { auth: { persistSession:false, autoRefreshToken:false, detectSessionInUrl:false } });
+  }
+}catch(e){ console.error('[YALOG ECOSYSTEM] erro ao iniciar client Supabase:', e); }
+
+async function testarConexao(){
+  if(!supabaseClient){ SUPABASE_ONLINE=false; return false; }
+  try{
+    const {error} = await supabaseClient.from('empresas').select('company_id',{count:'exact',head:true}).limit(1);
+    SUPABASE_ONLINE = !error;
+  }catch(e){ SUPABASE_ONLINE=false; }
+  return SUPABASE_ONLINE;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   HASH DE SENHA — MESMO algoritmo da Platform (item 31: reutilizar
+   a estrutura existente; a senha_hash já gravada em `usuarios` só
+   confere se o algoritmo for idêntico, caractere por caractere).
+   ═══════════════════════════════════════════════════════════════ */
+async function hashSenha(senha){
+  const material = senha + '::yalog';
+  try{
+    if(typeof crypto!=='undefined' && crypto.subtle && crypto.subtle.digest){
+      const enc=new TextEncoder().encode(material);
+      const buf=await crypto.subtle.digest('SHA-256',enc);
+      return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+    }
+  }catch(e){ console.warn('[YALOG ECOSYSTEM] crypto.subtle indisponível, usando fallback:', e.message); }
+  let h1=0x811c9dc5, h2=5381;
+  for(let i=0;i<material.length;i++){
+    const c=material.charCodeAt(i);
+    h1 ^= c; h1 = Math.imul(h1, 0x01000193);
+    h2 = ((h2<<5)+h2+c) & 0xffffffff;
+  }
+  return (h1>>>0).toString(16).padStart(8,'0') + (h2>>>0).toString(16).padStart(8,'0');
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ANONYMOUS AUTH (item 8/10/33) — ver nota de transparência no
+   relatório de entrega: isto dá ao cliente uma sessão real do
+   Supabase Auth (auth.uid() existe), mas as credenciais em si
+   (Company ID/Usuário/Senha) continuam validadas contra a tabela
+   `usuarios` já existente — os usuários da YALog não têm conta em
+   auth.users, e criar isso exigiria a chave service_role (não
+   disponível aqui) e migrar credenciais de todo o ecossistema já
+   validado, fora do escopo autorizado por esta sprint.
+   ═══════════════════════════════════════════════════════════════ */
+let _authUid = null;
+async function garantirAuthAnonima(){
+  if(_authUid) return _authUid;
+  if(!supabaseClient) return null;
+  try{
+    const {data:sessaoAtual} = await supabaseClient.auth.getSession();
+    if(sessaoAtual && sessaoAtual.session && sessaoAtual.session.user){
+      _authUid = sessaoAtual.session.user.id; return _authUid;
+    }
+    const {data, error} = await supabaseClient.auth.signInAnonymously();
+    if(error){ console.warn('[YALOG ECOSYSTEM] Anonymous Sign-In falhou:', error.message); return null; }
+    _authUid = data && data.user ? data.user.id : null;
+    return _authUid;
+  }catch(e){ console.warn('[YALOG ECOSYSTEM] exceção no Anonymous Sign-In:', e); return null; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SPRINT YALOG-ECOSYSTEM-002 — VÍNCULO REAL INSTALAÇÃO → EMPRESA
+   ═══════════════════════════════════════════════════════════════
+   Fecha a lacuna deixada explicitamente aberta na ECOSYSTEM-001
+   (isolamento multi-tenant só na interface). Chama a RPC
+   `registrar_instalacao_ecosystem` (ver ecosystem-rls-002.sql, ainda
+   não executado) — ela roda como SECURITY DEFINER e revalida empresa
+   ativa + licença ATIVA antes de gravar o vínculo; nunca confia no
+   company_id sozinho. A partir daqui, a RLS (quando aplicada) decide
+   o que este auth.uid() pode ler com base no vínculo já confirmado no
+   banco — não no que o JavaScript afirma.
+   ═══════════════════════════════════════════════════════════════ */
+async function registrarInstalacaoEcosystem(companyId){
+  try{
+    if(!supabaseClient) return false;
+    const authUid = await garantirAuthAnonima();
+    if(!authUid) return false;
+    const {error} = await supabaseClient.rpc('registrar_instalacao_ecosystem', { p_company_id: companyId });
+    if(error){
+      console.warn('[YALOG ECOSYSTEM] registrar_instalacao_ecosystem falhou — RLS real ainda não vai proteger esta sessão até isso ser corrigido:', error.message);
+      return false;
+    }
+    return true;
+  }catch(e){ console.warn('[YALOG ECOSYSTEM] exceção ao registrar instalação:', e); return false; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SESSÃO — só contexto não sensível (item 11/24). Nunca senha.
+   sessionStorage (não localStorage): morre ao fechar a aba/navegador
+   por padrão, reduzindo a superfície de "sessão esquecida aberta"
+   num dispositivo compartilhado — e toda restauração revalida contra
+   o Supabase antes de confiar em qualquer coisa salva localmente
+   (item 21: nunca confiar só no estado local).
+   ═══════════════════════════════════════════════════════════════ */
+const SESSAO_KEY = 'yalog_ecosystem_sessao';
+let SESSAO = null;
+
+function _protegerBotao(id, labelBusy){
+  const btn=document.getElementById(id);
+  if(!btn) return ()=>{};
+  const original=btn.textContent;
+  btn.disabled=true; btn.textContent=labelBusy;
+  return ()=>{ btn.disabled=false; btn.textContent=original; };
+}
+function mostrarErroLogin(msg){
+  const el=document.getElementById('loginErro');
+  el.textContent=msg; el.style.display='block';
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   LOGS (item 44) — reaproveita a tabela `logs` já existente, mesmo
+   formato usado pela Platform. Best-effort: nunca bloqueia o fluxo
+   principal se a gravação do log falhar.
+   ═══════════════════════════════════════════════════════════════ */
+async function logCliente(tipo, detalhe, companyId){
+  console.log('[YALOG ECOSYSTEM] '+tipo+(detalhe?': '+detalhe:''));
+  if(!SUPABASE_ONLINE || !supabaseClient) return;
+  try{
+    await supabaseClient.from('logs').insert([{
+      tipo, detalhe: detalhe||'', company_id: companyId||null, created_at:new Date().toISOString(),
+    }]);
+  }catch(e){ console.warn('[YALOG ECOSYSTEM] log best-effort falhou (não bloqueia a operação):', e.message||e); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   VALIDAÇÃO DE ACESSO (item 7/9/14) — mesma lógica de validação já
+   usada pela Platform/Pátio contra as tabelas existentes, sem
+   nenhuma tabela paralela.
+   ═══════════════════════════════════════════════════════════════ */
+async function validarLoginCliente(companyId, login, senha){
+  if(!supabaseClient) return {ok:false, erro:'Não foi possível conectar ao servidor.'};
+
+  const {data:empresas, error:eErr} = await supabaseClient.from('empresas').select('*').eq('company_id',companyId);
+  if(eErr) return {ok:false, erro:'Não foi possível verificar a empresa. Tente novamente.'};
+  if(!empresas || !empresas.length) return {ok:false, erro:'ID da empresa não encontrado.'};
+  const empresa=empresas[0];
+  if(empresa.ativo===false) return {ok:false, erro:'Esta empresa não está habilitada para acesso.'};
+
+  const {data:usuarios, error:uErr} = await supabaseClient.from('usuarios').select('*').eq('company_id',companyId).eq('login',login.toLowerCase());
+  if(uErr) return {ok:false, erro:'Não foi possível verificar o usuário. Tente novamente.'};
+  if(!usuarios || !usuarios.length) return {ok:false, erro:'Usuário ou senha inválidos.'};
+  const usuario=usuarios[0];
+  if(usuario.ativo===false) return {ok:false, erro:'Usuário desativado. Contate o administrador da sua empresa.'};
+  const hash=await hashSenha(senha);
+  if(hash!==usuario.senha_hash) return {ok:false, erro:'Usuário ou senha inválidos.'};
+
+  return {ok:true, empresa, usuario};
+}
+
+// item 14: as 5 condições exigidas, todas checadas antes de mostrar
+// OU de abrir qualquer módulo — nunca só uma vez no login.
+async function buscarModulosLiberados(companyId){
+  if(!supabaseClient) return {ok:false, modulos:[]};
+  try{
+    const [empresaRes, licencaRes, catalogoRes, vinculosRes] = await Promise.all([
+      supabaseClient.from('empresas').select('*').eq('company_id',companyId),
+      supabaseClient.from('licencas').select('*').eq('company_id',companyId),
+      supabaseClient.from('platform_modules').select('*').eq('status','ACTIVE'),
+      supabaseClient.from('modulos').select('*').eq('company_id',companyId).eq('status','LIBERADO'),
+    ]);
+    const empresa = empresaRes.data && empresaRes.data[0];
+    const licenca = licencaRes.data && licencaRes.data[0];
+    if(!empresa || empresa.ativo===false) return {ok:true, modulos:[]}; // empresa inativa = sem módulos, sem erro
+    if(!licenca || licenca.status!=='ATIVA') return {ok:true, modulos:[]}; // licença inválida = sem módulos
+
+    const catalogoAtivo = catalogoRes.data||[];
+    const vinculosLiberados = vinculosRes.data||[];
+    // item 15/29: interseção — só aparece o que está simultaneamente
+    // ACTIVE no catálogo global E LIBERADO para esta empresa. Nunca
+    // um if/else por module_id — puramente orientado a dados, então
+    // um módulo novo (ex.: 'financeiro') aparece automaticamente
+    // assim que existir nas duas listas, sem qualquer alteração aqui.
+    const disponiveis = catalogoAtivo.filter(m => vinculosLiberados.some(v => v.modulo===m.module_id));
+    return {ok:true, modulos:disponiveis};
+  }catch(e){
+    console.error('[YALOG ECOSYSTEM]', e);
+    return {ok:false, modulos:[]};
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   LOGIN (item 6/7/8/42)
+   ═══════════════════════════════════════════════════════════════ */
+async function fazerLoginCliente(){
+  const companyId=document.getElementById('inCompanyId').value.trim().toUpperCase();
+  const login=document.getElementById('inUsuario').value.trim().toLowerCase();
+  const senha=document.getElementById('inSenha').value;
+  const erroEl=document.getElementById('loginErro'); erroEl.style.display='none';
+
+  if(!companyId||!login||!senha){ mostrarErroLogin('Preencha ID da Empresa, Usuário e Senha.'); return; }
+
+  const restaurar=_protegerBotao('btnEntrar','Entrando...');
+  try{
+    await testarConexao();
+    if(!SUPABASE_ONLINE){ mostrarErroLogin('Não foi possível conectar ao servidor. Verifique sua internet e tente novamente.'); return; }
+    const r = await validarLoginCliente(companyId, login, senha);
+    if(!r.ok){ mostrarErroLogin(r.erro); await logCliente('CLIENTE_LOGIN_FALHOU','company_id='+companyId+' login='+login,companyId); return; }
+
+    await garantirAuthAnonima();
+    await registrarInstalacaoEcosystem(companyId);
+    SESSAO = {
+      companyId, login:r.usuario.login, nome:r.usuario.nome, role:r.usuario.role,
+      empresaNome:r.empresa.razao_social, iniciadoEm:new Date().toISOString(),
+    };
+    sessionStorage.setItem(SESSAO_KEY, JSON.stringify(SESSAO));
+    await logCliente('CLIENTE_LOGIN','company_id='+companyId+' login='+login,companyId);
+    await abrirAppCliente();
+  }catch(e){
+    console.error('[YALOG ECOSYSTEM] exceção no login:', e);
+    mostrarErroLogin('Não foi possível entrar. Verifique a conexão e tente novamente.');
+  }finally{ restaurar(); }
+}
+
+async function abrirAppCliente(){
+  document.getElementById('tela-login').style.display='none';
+  document.getElementById('app').style.display='flex';
+  document.getElementById('hdrNome').textContent=SESSAO.nome||SESSAO.login;
+  document.getElementById('hdrPerfil').textContent=_labelPerfil(SESSAO.role);
+  document.getElementById('empNome').textContent=SESSAO.empresaNome;
+  document.getElementById('empId').textContent='ID: '+SESSAO.companyId;
+  await renderMeusModulos();
+}
+// item 16: preparado para MASTER/LIDER/USUARIO — mesma visualização
+// nesta sprint (sem permissão detalhada por módulo ainda).
+function _labelPerfil(role){
+  const map={MASTER:'Master', LIDER:'Líder', USUARIO:'Usuário'};
+  return map[role]||role||'—';
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MÓDULOS (item 13/17/18/19/28)
+   ═══════════════════════════════════════════════════════════════ */
+async function renderMeusModulos(){
+  const grid=document.getElementById('gridMeusModulos');
+  grid.innerHTML='<div class="qs-empty">Carregando módulos<span class="loading-dots"></span></div>';
+  const r = await buscarModulosLiberados(SESSAO.companyId);
+  if(!r.ok){
+    grid.innerHTML='<div class="qs-empty">Não foi possível carregar seus módulos. <br><button class="btn btn-outline" onclick="renderMeusModulos()">Tentar novamente</button></div>';
+    return;
+  }
+  if(!r.modulos.length){
+    grid.innerHTML='<div class="qs-empty">Seu ecossistema ainda não possui módulos disponíveis.</div>';
+    return;
+  }
+  // item 19: renderização 100% orientada a dados — nenhum if por module_id.
+  grid.innerHTML=r.modulos.map(m=>`
+    <div class="mod-card">
+      <div class="mod-icon">${m.icon||'🧩'}</div>
+      <div class="mod-nome">${m.short_name||m.name}</div>
+      <div class="mod-desc">${m.description||''}</div>
+      <div class="mod-versao">v${m.version||'1.0.0'}</div>
+      <button class="btn btn-primary btn-block" id="btnAcessar-${m.module_id}" onclick="acessarModulo('${m.module_id}')">Acessar</button>
+    </div>
+  `).join('');
+}
+
+// item 20/21/22: revalida TUDO de novo, na hora do clique — nunca
+// confia no card já renderizado (que pode estar desatualizado se o
+// admin bloqueou o módulo nos últimos segundos).
+async function acessarModulo(moduleId){
+  const restaurar=_protegerBotao('btnAcessar-'+moduleId, 'Verificando...');
+  try{
+    const r = await buscarModulosLiberados(SESSAO.companyId);
+    const modulo = r.ok ? r.modulos.find(m=>m.module_id===moduleId) : null;
+    if(!modulo || !modulo.execution_url){
+      alert('Seu acesso a este módulo não está disponível.');
+      await renderMeusModulos(); // reflete o estado real (some da tela se foi bloqueado)
+      return;
+    }
+    await logCliente('MODULO_ACESSADO','company_id='+SESSAO.companyId+' modulo='+moduleId, SESSAO.companyId);
+    // item 23: mesma aba, para manter a experiência de ecossistema.
+    // Este ambiente não compartilha senha com o módulo — cada módulo
+    // (WMS/Pátio/...) tem seu próprio mecanismo de login/validação.
+    window.location.href = modulo.execution_url;
+  }catch(e){
+    console.error('[YALOG ECOSYSTEM]', e);
+    alert('Seu acesso a este módulo não está disponível.');
+  }finally{ restaurar(); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   LOGOUT (item 25)
+   ═══════════════════════════════════════════════════════════════ */
+async function logoutCliente(){
+  const restaurar=_protegerBotao('btnSair','Saindo...');
+  try{
+    await logCliente('CLIENTE_LOGOUT','company_id='+(SESSAO&&SESSAO.companyId)+' login='+(SESSAO&&SESSAO.login), SESSAO&&SESSAO.companyId);
+    if(supabaseClient) await supabaseClient.auth.signOut();
+  }catch(e){ console.warn('[YALOG ECOSYSTEM] erro no signOut:', e); }
+  sessionStorage.removeItem(SESSAO_KEY);
+  SESSAO=null; _authUid=null;
+  document.getElementById('app').style.display='none';
+  document.getElementById('tela-login').style.display='flex';
+  document.getElementById('inCompanyId').value='';
+  document.getElementById('inUsuario').value='';
+  document.getElementById('inSenha').value='';
+  restaurar();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   BOOT (item 24/39) — restaura sessão salva, mas SEMPRE revalida
+   contra o Supabase antes de confiar nela (nunca só o que está em
+   sessionStorage — item 21).
+   ═══════════════════════════════════════════════════════════════ */
+async function tentarRestaurarSessao(){
+  const statusEl=document.getElementById('connStatus');
+  await testarConexao();
+  statusEl.textContent = SUPABASE_ONLINE ? 'servidor conectado' : 'sem conexão com o servidor';
+  statusEl.className = 'conn-status '+(SUPABASE_ONLINE?'online':'offline');
+
+  const raw=sessionStorage.getItem(SESSAO_KEY);
+  if(!raw) return;
+  let sessaoSalva; try{ sessaoSalva=JSON.parse(raw); }catch(e){ return; }
+  if(!sessaoSalva||!sessaoSalva.companyId||!sessaoSalva.login) return;
+  if(!SUPABASE_ONLINE) return; // sem conexão, não dá pra revalidar — fica no login
+
+  // Sprint YALOG-ECOSYSTEM-002: sob RLS real, as consultas abaixo só
+  // retornam algo depois que o vínculo installation→empresa existir —
+  // por isso o registro/revalidação vem ANTES da consulta, não depois.
+  await garantirAuthAnonima();
+  await registrarInstalacaoEcosystem(sessaoSalva.companyId);
+
+  const {data:empresas} = await supabaseClient.from('empresas').select('*').eq('company_id',sessaoSalva.companyId);
+  const {data:usuarios} = await supabaseClient.from('usuarios').select('*').eq('company_id',sessaoSalva.companyId).eq('login',sessaoSalva.login);
+  const empresaOk = empresas && empresas.length && empresas[0].ativo!==false;
+  const usuarioOk = usuarios && usuarios.length && usuarios[0].ativo!==false;
+  if(!empresaOk || !usuarioOk){
+    console.warn('[YALOG ECOSYSTEM] sessão salva não revalida mais — voltando ao login.');
+    sessionStorage.removeItem(SESSAO_KEY);
+    return;
+  }
+  SESSAO=sessaoSalva;
+  await abrirAppCliente();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SPRINT YALOG-ECOSYSTEM-003, item 4/6 — LINK EXCLUSIVO POR EMPRESA
+   ═══════════════════════════════════════════════════════════════
+   O "endereço exclusivo" da ALLAS (ou de qualquer empresa) é este
+   MESMO arquivo, com ?empresa=YLG-XXXXXX na URL — nunca um arquivo
+   separado por cliente (item "não criar segunda plataforma"). Isso
+   só PRÉ-PREENCHE o campo Company ID, como conveniência de UX — nunca
+   autentica nem autoriza nada sozinho. O acesso de verdade continua
+   exigindo login+senha reais, validados no Supabase exatamente como
+   já acontecia (item 16/18: nunca confiar em URL/localStorage/JS para
+   autorização). Se o usuário tentar entrar com outra empresa, o campo
+   é só um valor de formulário como outro qualquer — sem nenhum
+   privilégio especial por ter vindo da URL.
+   ═══════════════════════════════════════════════════════════════ */
+(function preencherEmpresaDaURL(){
+  try{
+    const params = new URLSearchParams(window.location.search);
+    const empresaDaURL = params.get('empresa');
+    if(empresaDaURL){
+      const campo = document.getElementById('inCompanyId');
+      if(campo){
+        campo.value = empresaDaURL.toUpperCase().replace(/\s/g,'');
+        document.getElementById('inUsuario').focus();
+      }
+    }
+  }catch(e){ console.warn('[YALOG ECOSYSTEM] falha ao ler link exclusivo da URL (não afeta o login normal):', e); }
+})();
+
+tentarRestaurarSessao();
+</script>
+</body>
+</html>
