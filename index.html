@@ -349,52 +349,33 @@ function _labelPerfil(role){
 /* ═══════════════════════════════════════════════════════════════
    MÓDULOS (item 13/17/18/19/28)
    ═══════════════════════════════════════════════════════════════
-   SPRINT YALOG-ECOSYSTEM-007 — CORREÇÃO DEFINITIVA
+   SPRINT ECOSYSTEM-MODULE-AUTH-001 — CORREÇÃO ARQUITETURAL DEFINITIVA
    ═══════════════════════════════════════════════════════════════
-   A causa real do "Seu ecossistema ainda não possui módulos
-   disponíveis." não estava na consulta de módulos em si — estava
-   ANTES dela: esta função checava `licencas.status==='ATIVA'` e
-   retornava lista vazia (sem erro) se isso não batesse, mascarando
-   silenciosamente qualquer divergência de schema/valor daquela
-   tabela e nunca chegando a consultar `modulos`/`platform_modules`
-   de verdade. Removida — a validação de empresa/usuário já acontece
-   no login (validarLoginCliente(), intocada); esta função agora só
-   faz exatamente os passos 1-6 da regra definitiva: ler company_id,
-   consultar modulos (company_id + status=LIBERADO), consultar
-   platform_modules (status=ACTIVE), cruzar por modulo===module_id.
+   As 4 consultas simultâneas (empresas/licencas/platform_modules/
+   modulos) tentadas nas sprints anteriores nunca eram o problema em
+   si — o candidato real é RLS pensada para o role `anon`, enquanto a
+   sessão do Ecosystem (depois de signInAnonymously()) trafega como
+   `authenticated`. Em vez de mais um ajuste de filtro no frontend,
+   toda a autorização foi centralizada em uma única RPC
+   SECURITY DEFINER (public.obter_modulos_ecosystem, ver
+   ecosystem-module-auth-001-rpcs.sql) — ela roda com os privilégios
+   do dono da função, contornando esse problema de role por completo,
+   e passa a ser a ÚNICA fonte de módulos autorizados usada aqui.
    ═══════════════════════════════════════════════════════════════ */
 async function buscarModulosLiberados(companyId){
   if(!supabaseClient) return {ok:false, modulos:[]};
   console.log('[ECOSYSTEM] company_id:', companyId);
   try{
-    const { data: vinculos, error: erroVinculos } = await supabaseClient
-      .from('modulos').select('*').eq('company_id', companyId).eq('status', 'LIBERADO');
-    if(erroVinculos){
-      console.error('[ECOSYSTEM] Erro ao carregar vínculos:', erroVinculos);
+    const { data, error } = await supabaseClient.rpc('obter_modulos_ecosystem', { p_company_id: companyId });
+    if(error){
+      console.error('[ECOSYSTEM] erro ao obter módulos:', error);
+      console.log('[ECOSYSTEM] company_id:', companyId);
       return {ok:false, modulos:[]};
     }
-    console.log('[ECOSYSTEM] vínculos liberados:', vinculos);
-
-    const { data: catalogo, error: erroCatalogo } = await supabaseClient
-      .from('platform_modules').select('*').eq('status', 'ACTIVE');
-    if(erroCatalogo){
-      console.error('[ECOSYSTEM] Erro ao carregar catálogo:', erroCatalogo);
-      return {ok:false, modulos:[]};
-    }
-    console.log('[ECOSYSTEM] catálogo ativo:', catalogo);
-
-    // item 5/19: cruzamento puro por dado — nunca if/else por
-    // module_id. Um módulo novo (ex.: 'financeiro') aparece
-    // automaticamente assim que existir liberado+ativo, sem
-    // qualquer alteração de código.
-    const modulosDisponiveis = (vinculos || [])
-      .map(vinculo => (catalogo || []).find(modulo => modulo.module_id === vinculo.modulo))
-      .filter(Boolean);
-    console.log('[ECOSYSTEM] módulos disponíveis:', modulosDisponiveis);
-
-    return {ok:true, modulos: modulosDisponiveis};
+    console.log('[ECOSYSTEM] módulos autorizados:', data);
+    return {ok:true, modulos: data || []};
   }catch(e){
-    console.error('[ECOSYSTEM] Erro ao carregar módulos:', e);
+    console.error('[ECOSYSTEM] erro ao obter módulos:', e);
     return {ok:false, modulos:[]};
   }
 }
@@ -404,48 +385,59 @@ async function renderMeusModulos(){
   grid.innerHTML='<div class="qs-empty">Carregando módulos<span class="loading-dots"></span></div>';
   const r = await buscarModulosLiberados(SESSAO.companyId);
   if(!r.ok){
-    // item "IMPORTANTE SOBRE ERROS": nunca disfarçar erro real de
-    // consulta como se fosse simplesmente "sem módulos" — mensagens
-    // diferentes, propositalmente.
-    grid.innerHTML='<div class="qs-empty">Erro ao carregar módulos. <br><button class="btn btn-outline" onclick="renderMeusModulos()">Tentar novamente</button></div>';
+    // item "ERROS": nunca disfarçar erro real de consulta como se
+    // fosse simplesmente "sem módulos" — mensagem exata pedida.
+    grid.innerHTML='<div class="qs-empty">Não foi possível carregar seus módulos. <br><button class="btn btn-outline" onclick="renderMeusModulos()">Tentar novamente</button></div>';
     return;
   }
   if(!r.modulos.length){
     grid.innerHTML='<div class="qs-empty">Seu ecossistema ainda não possui módulos disponíveis.</div>';
     return;
   }
-  // item 19: renderização 100% orientada a dados — nenhum if por module_id.
-  grid.innerHTML=r.modulos.map(m=>`
+  // item 19: renderização 100% orientada a dados — nenhum if por
+  // module_id. item "execution_url": módulo sem URL publicada
+  // continua aparecendo (nunca escondido) — só o botão muda de texto
+  // e, ao clicar, informa exatamente a situação, sem navegar.
+  grid.innerHTML=r.modulos.map(m=>{
+    const disponivel = !!m.execution_url;
+    return `
     <div class="mod-card">
       <div class="mod-icon">${m.icon||'🧩'}</div>
       <div class="mod-nome">${m.short_name||m.name}</div>
       <div class="mod-desc">${m.description||''}</div>
       <div class="mod-versao">v${m.version||'1.0.0'}</div>
-      <button class="btn btn-primary btn-block" id="btnAcessar-${m.module_id}" onclick="acessarModulo('${m.module_id}')">Acessar</button>
+      <button class="btn ${disponivel?'btn-primary':'btn-outline'} btn-block" id="btnAcessar-${m.module_id}" onclick="acessarModulo('${m.module_id}')">${disponivel?'Acessar':'Ainda não disponível'}</button>
     </div>
-  `).join('');
+  `;}).join('');
+  console.log('[ECOSYSTEM] módulos renderizados:', r.modulos);
 }
 
-// item 20/21/22: revalida TUDO de novo, na hora do clique — nunca
-// confia no card já renderizado (que pode estar desatualizado se o
-// admin bloqueou o módulo nos últimos segundos).
+// item 20/21/22 (sprints anteriores) + "ACESSAR MÓDULO" desta sprint:
+// revalida TUDO de novo, na hora do clique, via a mesma RPC — nunca
+// confia no card já renderizado (pode estar desatualizado se o admin
+// bloqueou o módulo nos últimos segundos).
 async function acessarModulo(moduleId){
   const restaurar=_protegerBotao('btnAcessar-'+moduleId, 'Verificando...');
   try{
     const r = await buscarModulosLiberados(SESSAO.companyId);
     const modulo = r.ok ? r.modulos.find(m=>m.module_id===moduleId) : null;
-    if(!modulo || !modulo.execution_url){
+    if(!modulo){
       alert('Seu acesso a este módulo não está disponível.');
       await renderMeusModulos(); // reflete o estado real (some da tela se foi bloqueado)
       return;
     }
+    if(!modulo.execution_url){
+      alert('Este módulo ainda não possui endereço de execução publicado.');
+      return;
+    }
     await logCliente('MODULO_ACESSADO','company_id='+SESSAO.companyId+' modulo='+moduleId, SESSAO.companyId);
-    // item 23: mesma aba, para manter a experiência de ecossistema.
-    // Este ambiente não compartilha senha com o módulo — cada módulo
-    // (WMS/Pátio/...) tem seu próprio mecanismo de login/validação.
+    // item 23 (sprint anterior): mesma aba, para manter a experiência
+    // de ecossistema. Este ambiente não compartilha senha com o
+    // módulo — cada módulo (WMS/Pátio/...) tem seu próprio mecanismo
+    // de login/validação.
     window.location.href = modulo.execution_url;
   }catch(e){
-    console.error('[YALOG ECOSYSTEM]', e);
+    console.error('[ECOSYSTEM] erro ao acessar módulo:', e);
     alert('Seu acesso a este módulo não está disponível.');
   }finally{ restaurar(); }
 }
@@ -549,7 +541,7 @@ async function resolverEmpresaDaURL(){
   }catch(e){ console.warn('[YALOG ECOSYSTEM] exceção ao resolver empresa da URL (não afeta o login normal):', e); }
 }
 
-console.log('[ECOSYSTEM] build: YALOG-ECOSYSTEM-008 (buscarModulosLiberados sem dependência de licencas)');
+console.log('[ECOSYSTEM] build: ECOSYSTEM-MODULE-AUTH-001 (RPC obter_modulos_ecosystem como fonte única)');
 (async function bootEcosystem(){
   await resolverEmpresaDaURL();
   await tentarRestaurarSessao();
