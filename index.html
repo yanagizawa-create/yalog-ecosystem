@@ -549,6 +549,7 @@ async function resolverEmpresaDaURL(){
   }catch(e){ console.warn('[YALOG ECOSYSTEM] exceção ao resolver empresa da URL (não afeta o login normal):', e); }
 }
 
+console.log('[ECOSYSTEM] build: YALOG-ECOSYSTEM-008 (buscarModulosLiberados sem dependência de licencas)');
 (async function bootEcosystem(){
   await resolverEmpresaDaURL();
   await tentarRestaurarSessao();
