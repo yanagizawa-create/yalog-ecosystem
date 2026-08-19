@@ -213,6 +213,32 @@ async function hashSenha(senha){
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   ANONYMOUS AUTH (item 8/10/33) — ver nota de transparência no
+   relatório de entrega: isto dá ao cliente uma sessão real do
+   Supabase Auth (auth.uid() existe), mas as credenciais em si
+   (Company ID/Usuário/Senha) continuam validadas contra a tabela
+   `usuarios` já existente — os usuários da YALog não têm conta em
+   auth.users, e criar isso exigiria a chave service_role (não
+   disponível aqui) e migrar credenciais de todo o ecossistema já
+   validado, fora do escopo autorizado por esta sprint.
+   ═══════════════════════════════════════════════════════════════ */
+let _authUid = null;
+async function garantirAuthAnonima(){
+  if(_authUid) return _authUid;
+  if(!supabaseClient) return null;
+  try{
+    const {data:sessaoAtual} = await supabaseClient.auth.getSession();
+    if(sessaoAtual && sessaoAtual.session && sessaoAtual.session.user){
+      _authUid = sessaoAtual.session.user.id; return _authUid;
+    }
+    const {data, error} = await supabaseClient.auth.signInAnonymously();
+    if(error){ console.warn('[YALOG ECOSYSTEM] Anonymous Sign-In falhou:', error.message); return null; }
+    _authUid = data && data.user ? data.user.id : null;
+    return _authUid;
+  }catch(e){ console.warn('[YALOG ECOSYSTEM] exceção no Anonymous Sign-In:', e); return null; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
    SPRINT AUTH/RLS/SSO — registrarInstalacaoEcosystem() removida.
    O vínculo em company_installations agora é criado/atualizado
    DENTRO de autenticar_ecosystem() (login) e revalidar_sessao_
@@ -222,9 +248,12 @@ async function hashSenha(senha){
    ═══════════════════════════════════════════════════════════════ */
 
 /* ═══════════════════════════════════════════════════════════════
-   SESSÃO — contexto mínimo + session_token emitido pelo servidor.
-   localStorage sobrevive a F5/reabertura; o token não é exibido na UI.
-   Toda restauração revalida o token contra o Supabase.
+   SESSÃO — só contexto não sensível (item 11/24). Nunca senha.
+   sessionStorage (não localStorage): morre ao fechar a aba/navegador
+   por padrão, reduzindo a superfície de "sessão esquecida aberta"
+   num dispositivo compartilhado — e toda restauração revalida contra
+   o Supabase antes de confiar em qualquer coisa salva localmente
+   (item 21: nunca confiar só no estado local).
    ═══════════════════════════════════════════════════════════════ */
 const SESSAO_KEY = 'yalog_ecosystem_sessao';
 let SESSAO = null;
@@ -284,8 +313,11 @@ async function fazerLoginCliente(){
     await testarConexao();
     if(!SUPABASE_ONLINE){ mostrarErroLogin('Não foi possível conectar ao servidor. Verifique sua internet e tente novamente.'); return; }
 
-    // Autenticação centralizada exclusivamente pela RPC SECURITY DEFINER.
-    // Não depende de Supabase Anonymous Auth.
+    // item 3, passos 3/4: Anonymous Auth ANTES da RPC — sem auth.uid()
+    // não há como a RPC criar o vínculo em company_installations.
+    const authUid = await garantirAuthAnonima();
+    if(!authUid){ mostrarErroLogin('Não foi possível iniciar sua sessão segura. Verifique sua conexão e tente novamente.'); return; }
+
     const senhaHash = await hashSenha(senha);
     const { data, error } = await supabaseClient.rpc('autenticar_ecosystem', {
       p_company_id: companyId, p_login: login, p_senha_hash: senhaHash,
@@ -301,14 +333,7 @@ async function fazerLoginCliente(){
       return;
     }
 
-    if(!data.session_token){
-      console.error('[ECOSYSTEM] autenticação retornou sucesso sem session_token:', data);
-      mostrarErroLogin('O servidor autenticou, mas não retornou o token de sessão. Contate o administrador.');
-      return;
-    }
-
     SESSAO = {
-      sessionToken: data.session_token,
       companyId: data.company_id, login: data.login, nome: data.nome, role: data.role,
       empresaNome: data.empresa_nome, iniciadoEm: new Date().toISOString(),
     };
@@ -346,7 +371,7 @@ function _labelPerfil(role){
    As 4 consultas simultâneas (empresas/licencas/platform_modules/
    modulos) tentadas nas sprints anteriores nunca eram o problema em
    si — o candidato real é RLS pensada para o role `anon`, enquanto a
-   sessão do Ecosystem (usando session_token próprio do Ecosystem) trafega como
+   sessão do Ecosystem (depois de signInAnonymously()) trafega como
    `authenticated`. Em vez de mais um ajuste de filtro no frontend,
    toda a autorização foi centralizada em uma única RPC
    SECURITY DEFINER (public.obter_modulos_ecosystem, ver
@@ -425,7 +450,7 @@ async function acessarModulo(moduleId){
       return;
     }
     const { data: token, error } = await supabaseClient.rpc('gerar_handoff_modulo', {
-      p_session_token: SESSAO.sessionToken, p_modulo: moduleId,
+      p_company_id: SESSAO.companyId, p_login: SESSAO.login, p_modulo: moduleId,
     });
     if(error){
       console.error('[ECOSYSTEM] erro ao gerar handoff:', error);
@@ -459,10 +484,10 @@ async function logoutCliente(){
   const restaurar=_protegerBotao('btnSair','Saindo...');
   try{
     await logCliente('CLIENTE_LOGOUT','company_id='+(SESSAO&&SESSAO.companyId)+' login='+(SESSAO&&SESSAO.login), SESSAO&&SESSAO.companyId);
-    // Sem Supabase Auth: o Ecosystem encerra sua própria sessão removendo o token local.
+    if(supabaseClient) await supabaseClient.auth.signOut();
   }catch(e){ console.warn('[YALOG ECOSYSTEM] erro no signOut:', e); }
   localStorage.removeItem(SESSAO_KEY);
-  SESSAO=null;
+  SESSAO=null; _authUid=null;
   document.getElementById('app').style.display='none';
   document.getElementById('tela-carregando').classList.add('hidden');
   document.getElementById('tela-login').classList.remove('hidden');
@@ -536,17 +561,20 @@ async function tentarRestaurarSessao(){
     return;
   }
 
-  if(!sessaoSalva.sessionToken){
-    console.warn('[YALOG ECOSYSTEM] sessão salva sem session_token; novo login necessário.');
-    localStorage.removeItem(SESSAO_KEY);
+  // item 5: Anonymous Auth ANTES da RPC de revalidação — sem
+  // auth.uid() não há como confirmar o vínculo em
+  // company_installations.
+  const authUid = await garantirAuthAnonima();
+  if(!authUid){
+    console.warn('[YALOG ECOSYSTEM] não foi possível obter auth.uid() para revalidar — sessão local preservada.');
     authLoading=false;
     _mostrarTelaLogin();
+    if(statusEl) statusEl.textContent='não foi possível revalidar a sessão agora — tente novamente';
     return;
   }
 
-  // Revalidação exclusivamente pelo token emitido pelo servidor.
   const { data, error } = await supabaseClient.rpc('revalidar_sessao_ecosystem', {
-    p_session_token: sessaoSalva.sessionToken,
+    p_company_id: sessaoSalva.companyId, p_login: sessaoSalva.login,
   });
 
   // item 6: erro de consulta (rede instável, timeout, etc.) NUNCA apaga
@@ -569,7 +597,6 @@ async function tentarRestaurarSessao(){
     return;
   }
   SESSAO = {
-    sessionToken: data.session_token || sessaoSalva.sessionToken,
     companyId: data.company_id, login: data.login, nome: data.nome, role: data.role,
     empresaNome: data.empresa_nome, iniciadoEm: sessaoSalva.iniciadoEm || new Date().toISOString(),
   };
@@ -610,7 +637,7 @@ function resolverEmpresaDaURL(){
   }catch(e){ console.warn('[YALOG ECOSYSTEM] exceção ao preencher empresa da URL (não afeta o login normal):', e); }
 }
 
-console.log('[ECOSYSTEM] build: AUTH-RLS-SSO-SESSION-TOKEN-SESSION-TOKEN (RPCs de autenticação/revalidação/handoff)');
+console.log('[ECOSYSTEM] build: AUTH-RLS-SSO (autenticar_ecosystem/revalidar_sessao_ecosystem, zero SELECT direto em empresas/usuarios)');
 (async function bootEcosystem(){
   await tentarRestaurarSessao();
   if(!SESSAO){
