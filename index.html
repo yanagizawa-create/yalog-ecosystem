@@ -297,37 +297,6 @@ async function validarLoginCliente(companyId, login, senha){
   return {ok:true, empresa, usuario};
 }
 
-// item 14: as 5 condições exigidas, todas checadas antes de mostrar
-// OU de abrir qualquer módulo — nunca só uma vez no login.
-async function buscarModulosLiberados(companyId){
-  if(!supabaseClient) return {ok:false, modulos:[]};
-  try{
-    const [empresaRes, licencaRes, catalogoRes, vinculosRes] = await Promise.all([
-      supabaseClient.from('empresas').select('*').eq('company_id',companyId),
-      supabaseClient.from('licencas').select('*').eq('company_id',companyId),
-      supabaseClient.from('platform_modules').select('*').eq('status','ACTIVE'),
-      supabaseClient.from('modulos').select('*').eq('company_id',companyId).eq('status','LIBERADO'),
-    ]);
-    const empresa = empresaRes.data && empresaRes.data[0];
-    const licenca = licencaRes.data && licencaRes.data[0];
-    if(!empresa || empresa.ativo===false) return {ok:true, modulos:[]}; // empresa inativa = sem módulos, sem erro
-    if(!licenca || licenca.status!=='ATIVA') return {ok:true, modulos:[]}; // licença inválida = sem módulos
-
-    const catalogoAtivo = catalogoRes.data||[];
-    const vinculosLiberados = vinculosRes.data||[];
-    // item 15/29: interseção — só aparece o que está simultaneamente
-    // ACTIVE no catálogo global E LIBERADO para esta empresa. Nunca
-    // um if/else por module_id — puramente orientado a dados, então
-    // um módulo novo (ex.: 'financeiro') aparece automaticamente
-    // assim que existir nas duas listas, sem qualquer alteração aqui.
-    const disponiveis = catalogoAtivo.filter(m => vinculosLiberados.some(v => v.modulo===m.module_id));
-    return {ok:true, modulos:disponiveis};
-  }catch(e){
-    console.error('[YALOG ECOSYSTEM]', e);
-    return {ok:false, modulos:[]};
-  }
-}
-
 /* ═══════════════════════════════════════════════════════════════
    LOGIN (item 6/7/8/42)
    ═══════════════════════════════════════════════════════════════ */
@@ -379,13 +348,66 @@ function _labelPerfil(role){
 
 /* ═══════════════════════════════════════════════════════════════
    MÓDULOS (item 13/17/18/19/28)
+   ═══════════════════════════════════════════════════════════════
+   SPRINT YALOG-ECOSYSTEM-007 — CORREÇÃO DEFINITIVA
+   ═══════════════════════════════════════════════════════════════
+   A causa real do "Seu ecossistema ainda não possui módulos
+   disponíveis." não estava na consulta de módulos em si — estava
+   ANTES dela: esta função checava `licencas.status==='ATIVA'` e
+   retornava lista vazia (sem erro) se isso não batesse, mascarando
+   silenciosamente qualquer divergência de schema/valor daquela
+   tabela e nunca chegando a consultar `modulos`/`platform_modules`
+   de verdade. Removida — a validação de empresa/usuário já acontece
+   no login (validarLoginCliente(), intocada); esta função agora só
+   faz exatamente os passos 1-6 da regra definitiva: ler company_id,
+   consultar modulos (company_id + status=LIBERADO), consultar
+   platform_modules (status=ACTIVE), cruzar por modulo===module_id.
    ═══════════════════════════════════════════════════════════════ */
+async function buscarModulosLiberados(companyId){
+  if(!supabaseClient) return {ok:false, modulos:[]};
+  console.log('[ECOSYSTEM] company_id:', companyId);
+  try{
+    const { data: vinculos, error: erroVinculos } = await supabaseClient
+      .from('modulos').select('*').eq('company_id', companyId).eq('status', 'LIBERADO');
+    if(erroVinculos){
+      console.error('[ECOSYSTEM] Erro ao carregar vínculos:', erroVinculos);
+      return {ok:false, modulos:[]};
+    }
+    console.log('[ECOSYSTEM] vínculos liberados:', vinculos);
+
+    const { data: catalogo, error: erroCatalogo } = await supabaseClient
+      .from('platform_modules').select('*').eq('status', 'ACTIVE');
+    if(erroCatalogo){
+      console.error('[ECOSYSTEM] Erro ao carregar catálogo:', erroCatalogo);
+      return {ok:false, modulos:[]};
+    }
+    console.log('[ECOSYSTEM] catálogo ativo:', catalogo);
+
+    // item 5/19: cruzamento puro por dado — nunca if/else por
+    // module_id. Um módulo novo (ex.: 'financeiro') aparece
+    // automaticamente assim que existir liberado+ativo, sem
+    // qualquer alteração de código.
+    const modulosDisponiveis = (vinculos || [])
+      .map(vinculo => (catalogo || []).find(modulo => modulo.module_id === vinculo.modulo))
+      .filter(Boolean);
+    console.log('[ECOSYSTEM] módulos disponíveis:', modulosDisponiveis);
+
+    return {ok:true, modulos: modulosDisponiveis};
+  }catch(e){
+    console.error('[ECOSYSTEM] Erro ao carregar módulos:', e);
+    return {ok:false, modulos:[]};
+  }
+}
+
 async function renderMeusModulos(){
   const grid=document.getElementById('gridMeusModulos');
   grid.innerHTML='<div class="qs-empty">Carregando módulos<span class="loading-dots"></span></div>';
   const r = await buscarModulosLiberados(SESSAO.companyId);
   if(!r.ok){
-    grid.innerHTML='<div class="qs-empty">Não foi possível carregar seus módulos. <br><button class="btn btn-outline" onclick="renderMeusModulos()">Tentar novamente</button></div>';
+    // item "IMPORTANTE SOBRE ERROS": nunca disfarçar erro real de
+    // consulta como se fosse simplesmente "sem módulos" — mensagens
+    // diferentes, propositalmente.
+    grid.innerHTML='<div class="qs-empty">Erro ao carregar módulos. <br><button class="btn btn-outline" onclick="renderMeusModulos()">Tentar novamente</button></div>';
     return;
   }
   if(!r.modulos.length){
