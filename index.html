@@ -178,7 +178,12 @@ try{
 async function testarConexao(){
   if(!supabaseClient){ SUPABASE_ONLINE=false; return false; }
   try{
-    const {error} = await supabaseClient.from('empresas').select('company_id',{count:'exact',head:true}).limit(1);
+    // Sprint AUTH/RLS/SSO: não usar mais SELECT em `empresas` só para
+    // testar conectividade — sob RLS real essa consulta também seria
+    // bloqueada sem vínculo prévio, fazendo o indicador mentir "offline"
+    // mesmo com o servidor no ar. getSession() testa o mesmo endpoint
+    // Supabase sem depender de nenhuma policy de tabela.
+    const {error} = await supabaseClient.auth.getSession();
     SUPABASE_ONLINE = !error;
   }catch(e){ SUPABASE_ONLINE=false; }
   return SUPABASE_ONLINE;
@@ -234,30 +239,13 @@ async function garantirAuthAnonima(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SPRINT YALOG-ECOSYSTEM-002 — VÍNCULO REAL INSTALAÇÃO → EMPRESA
-   ═══════════════════════════════════════════════════════════════
-   Fecha a lacuna deixada explicitamente aberta na ECOSYSTEM-001
-   (isolamento multi-tenant só na interface). Chama a RPC
-   `registrar_instalacao_ecosystem` (ver ecosystem-rls-002.sql, ainda
-   não executado) — ela roda como SECURITY DEFINER e revalida empresa
-   ativa + licença ATIVA antes de gravar o vínculo; nunca confia no
-   company_id sozinho. A partir daqui, a RLS (quando aplicada) decide
-   o que este auth.uid() pode ler com base no vínculo já confirmado no
-   banco — não no que o JavaScript afirma.
+   SPRINT AUTH/RLS/SSO — registrarInstalacaoEcosystem() removida.
+   O vínculo em company_installations agora é criado/atualizado
+   DENTRO de autenticar_ecosystem() (login) e revalidar_sessao_
+   ecosystem() (F5/restauração) — SECURITY DEFINER, no mesmo passo
+   que já valida empresa/usuário/licença. Uma chamada JS separada
+   para isso ficou redundante e foi eliminada, não só desligada.
    ═══════════════════════════════════════════════════════════════ */
-async function registrarInstalacaoEcosystem(companyId){
-  try{
-    if(!supabaseClient) return false;
-    const authUid = await garantirAuthAnonima();
-    if(!authUid) return false;
-    const {error} = await supabaseClient.rpc('registrar_instalacao_ecosystem', { p_company_id: companyId });
-    if(error){
-      console.warn('[YALOG ECOSYSTEM] registrar_instalacao_ecosystem falhou — RLS real ainda não vai proteger esta sessão até isso ser corrigido:', error.message);
-      return false;
-    }
-    return true;
-  }catch(e){ console.warn('[YALOG ECOSYSTEM] exceção ao registrar instalação:', e); return false; }
-}
 
 /* ═══════════════════════════════════════════════════════════════
    SESSÃO — só contexto não sensível (item 11/24). Nunca senha.
@@ -298,32 +286,18 @@ async function logCliente(tipo, detalhe, companyId){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   VALIDAÇÃO DE ACESSO (item 7/9/14) — mesma lógica de validação já
-   usada pela Platform/Pátio contra as tabelas existentes, sem
-   nenhuma tabela paralela.
+   SPRINT AUTH/RLS/SSO — item 3: autenticação centralizada na RPC. Sob RLS real, essas tabelas não são
+   mais legíveis pelo anon/authenticated sem vínculo prévio — a
+   validação inteira (empresa, usuário, senha, licença) agora
+   acontece dentro de autenticar_ecosystem(), SECURITY DEFINER,
+   que só então cria o vínculo em company_installations. O antigo
+   validarLoginCliente() foi removido — não existe mais nada
+   consultando empresas/usuarios diretamente do cliente antes de
+   autenticar.
    ═══════════════════════════════════════════════════════════════ */
-async function validarLoginCliente(companyId, login, senha){
-  if(!supabaseClient) return {ok:false, erro:'Não foi possível conectar ao servidor.'};
-
-  const {data:empresas, error:eErr} = await supabaseClient.from('empresas').select('*').eq('company_id',companyId);
-  if(eErr) return {ok:false, erro:'Não foi possível verificar a empresa. Tente novamente.'};
-  if(!empresas || !empresas.length) return {ok:false, erro:'ID da empresa não encontrado.'};
-  const empresa=empresas[0];
-  if(empresa.ativo===false) return {ok:false, erro:'Esta empresa não está habilitada para acesso.'};
-
-  const {data:usuarios, error:uErr} = await supabaseClient.from('usuarios').select('*').eq('company_id',companyId).eq('login',login.toLowerCase());
-  if(uErr) return {ok:false, erro:'Não foi possível verificar o usuário. Tente novamente.'};
-  if(!usuarios || !usuarios.length) return {ok:false, erro:'Usuário ou senha inválidos.'};
-  const usuario=usuarios[0];
-  if(usuario.ativo===false) return {ok:false, erro:'Usuário desativado. Contate o administrador da sua empresa.'};
-  const hash=await hashSenha(senha);
-  if(hash!==usuario.senha_hash) return {ok:false, erro:'Usuário ou senha inválidos.'};
-
-  return {ok:true, empresa, usuario};
-}
 
 /* ═══════════════════════════════════════════════════════════════
-   LOGIN (item 6/7/8/42)
+   LOGIN (item 3)
    ═══════════════════════════════════════════════════════════════ */
 async function fazerLoginCliente(){
   const companyId=document.getElementById('inCompanyId').value.trim().toUpperCase();
@@ -337,16 +311,33 @@ async function fazerLoginCliente(){
   try{
     await testarConexao();
     if(!SUPABASE_ONLINE){ mostrarErroLogin('Não foi possível conectar ao servidor. Verifique sua internet e tente novamente.'); return; }
-    const r = await validarLoginCliente(companyId, login, senha);
-    if(!r.ok){ mostrarErroLogin(r.erro); await logCliente('CLIENTE_LOGIN_FALHOU','company_id='+companyId+' login='+login,companyId); return; }
 
-    await garantirAuthAnonima();
-    await registrarInstalacaoEcosystem(companyId);
+    const senhaHash = await hashSenha(senha);
+    const { data, error } = await supabaseClient.rpc('autenticar_ecosystem', {
+      p_company_id: companyId, p_login: login, p_senha_hash: senhaHash,
+    });
+    if(error){
+      console.error('[ECOSYSTEM] erro ao autenticar:', error);
+      mostrarErroLogin('Não foi possível validar sua sessão. Tente novamente.');
+      return;
+    }
+    if(!data || data.ok!==true){
+      mostrarErroLogin((data&&data.erro) || 'Usuário ou senha inválidos.');
+      await logCliente('CLIENTE_LOGIN_FALHOU','company_id='+companyId+' login='+login,companyId);
+      return;
+    }
+
+    if(!data.session_token){
+      console.error('[ECOSYSTEM] autenticação sem session_token:', data);
+      mostrarErroLogin('Sessão autenticada, mas não foi possível criar a sessão do Ecosystem.');
+      return;
+    }
     SESSAO = {
-      companyId, login:r.usuario.login, nome:r.usuario.nome, role:r.usuario.role,
-      empresaNome:r.empresa.razao_social, iniciadoEm:new Date().toISOString(),
+      companyId: data.company_id, login: data.login, nome: data.nome, role: data.role,
+      empresaNome: data.empresa_nome, sessionToken: data.session_token,
+      expiresAt: data.expires_at || null, iniciadoEm: new Date().toISOString(),
     };
-    localStorage.setItem(SESSAO_KEY, JSON.stringify(SESSAO)); // item 1/9: localStorage — sobrevive a F5 e a fechar/reabrir a aba
+    localStorage.setItem(SESSAO_KEY, JSON.stringify(SESSAO));
     await logCliente('CLIENTE_LOGIN','company_id='+companyId+' login='+login,companyId);
     await abrirAppCliente();
   }catch(e){
@@ -458,8 +449,13 @@ async function acessarModulo(moduleId){
       mostrarMensagem('Este módulo ainda não possui endereço de execução publicado.');
       return;
     }
+    if(!SESSAO || !SESSAO.sessionToken){
+      mostrarMensagem('Sua sessão não está disponível. Faça login novamente.');
+      return;
+    }
     const { data: token, error } = await supabaseClient.rpc('gerar_handoff_modulo', {
-      p_company_id: SESSAO.companyId, p_login: SESSAO.login, p_modulo: moduleId,
+      p_session_token: SESSAO.sessionToken,
+      p_modulo: moduleId,
     });
     if(error){
       console.error('[ECOSYSTEM] erro ao gerar handoff:', error);
@@ -556,50 +552,67 @@ async function tentarRestaurarSessao(){
   }
 
   const raw=localStorage.getItem(SESSAO_KEY);
-  if(!raw){ authLoading=false; _mostrarTelaLogin(); return; }
-  let sessaoSalva; try{ sessaoSalva=JSON.parse(raw); }catch(e){ authLoading=false; _mostrarTelaLogin(); return; }
-  if(!sessaoSalva||!sessaoSalva.companyId||!sessaoSalva.login){ authLoading=false; _mostrarTelaLogin(); return; }
+  if(!raw){
+    authLoading=false;
+    _mostrarTelaLogin();
+    return;
+  }
+
+  let sessaoSalva;
+  try{ sessaoSalva=JSON.parse(raw); }
+  catch(e){
+    localStorage.removeItem(SESSAO_KEY);
+    authLoading=false;
+    _mostrarTelaLogin();
+    return;
+  }
+
+  if(!sessaoSalva || !sessaoSalva.companyId || !sessaoSalva.login || !sessaoSalva.sessionToken){
+    localStorage.removeItem(SESSAO_KEY);
+    authLoading=false;
+    _mostrarTelaLogin();
+    return;
+  }
+
   if(!SUPABASE_ONLINE){
-    // item 1: sem conexão não é "deslogado" — é indeterminado. Mas
-    // sem rede também não há como abrir o app (precisa validar dados
-    // reais) — fica na tela de carregamento até a conexão voltar,
-    // nunca pula direto para "faça login de novo".
     authLoading=false;
     _mostrarTelaLogin();
     if(statusEl) statusEl.textContent='sem conexão — não foi possível restaurar a sessão';
     return;
   }
 
-  // Sprint YALOG-ECOSYSTEM-002: sob RLS real, as consultas abaixo só
-  // retornam algo depois que o vínculo installation→empresa existir —
-  // por isso o registro/revalidação vem ANTES da consulta, não depois.
-  await garantirAuthAnonima();
-  await registrarInstalacaoEcosystem(sessaoSalva.companyId);
+  const { data, error } = await supabaseClient.rpc('revalidar_sessao_ecosystem', {
+    p_session_token: sessaoSalva.sessionToken,
+  });
 
-  const {data:empresas, error:erroEmpresa} = await supabaseClient.from('empresas').select('*').eq('company_id',sessaoSalva.companyId);
-  const {data:usuarios, error:erroUsuario} = await supabaseClient.from('usuarios').select('*').eq('company_id',sessaoSalva.companyId).eq('login',sessaoSalva.login);
-
-  // item 6: erro de consulta (rede instável, timeout, etc.) NUNCA apaga
-  // a sessão salva — só uma resposta conclusiva (sem erro) dizendo que
-  // empresa/usuário realmente não confirmam é que justifica logout.
-  if(erroEmpresa || erroUsuario){
-    console.warn('[YALOG ECOSYSTEM] falha ao revalidar sessão (erro de consulta, não de autorização) — mantendo sessão salva, tentando novamente depois:', erroEmpresa||erroUsuario);
+  if(error){
+    console.warn('[YALOG ECOSYSTEM] falha ao revalidar sessão — mantendo sessão local para nova tentativa:', error);
     authLoading=false;
     _mostrarTelaLogin();
     if(statusEl) statusEl.textContent='não foi possível revalidar a sessão agora — tente novamente';
     return;
   }
 
-  const empresaOk = empresas && empresas.length && empresas[0].ativo!==false;
-  const usuarioOk = usuarios && usuarios.length && usuarios[0].ativo!==false;
-  if(!empresaOk || !usuarioOk){
-    console.warn('[YALOG ECOSYSTEM] sessão salva não revalida mais — voltando ao login.');
+  if(!data || data.ok!==true || !data.session_token){
+    console.warn('[YALOG ECOSYSTEM] sessão salva não é mais válida — voltando ao login.');
     localStorage.removeItem(SESSAO_KEY);
     authLoading=false;
     _mostrarTelaLogin();
     return;
   }
-  SESSAO=sessaoSalva;
+
+  SESSAO = {
+    companyId: data.company_id,
+    login: data.login,
+    nome: data.nome,
+    role: data.role,
+    empresaNome: data.empresa_nome,
+    sessionToken: data.session_token,
+    expiresAt: data.expires_at || null,
+    iniciadoEm: sessaoSalva.iniciadoEm || new Date().toISOString(),
+  };
+
+  localStorage.setItem(SESSAO_KEY, JSON.stringify(SESSAO));
   authLoading=false;
   await abrirAppCliente();
 }
@@ -609,15 +622,10 @@ async function tentarRestaurarSessao(){
    EMPRESA PELA URL (substitui o pré-preenchimento simples da
    ECOSYSTEM-003, que nunca consultava o Supabase)
    ═══════════════════════════════════════════════════════════════
-   Lê ?empresa= da URL, resolve contra public.empresas usando
-   EXATAMENTE .eq('company_id',...).eq('ativo',true) — a tabela não
-   tem coluna `status`; o campo real de controle de atividade é
-   `ativo`. Se resolver: trava o campo (read-only, item 3) e foca
-   direto no usuário — não exige redigitar o Company ID. Se não
-   resolver: mostra "Empresa não encontrada ou inativa." na tela de
-   login, sem travar nada. Isso continua sendo só UX — o login em si
-   (validarLoginCliente, abaixo) faz sua própria validação completa e
-   independente; nada aqui autentica ou autoriza sozinho.
+   Lê ?empresa= da URL apenas para preencher o Company ID visualmente.
+   O campo fica read-only e o foco vai direto para o usuário. A URL
+   NÃO consulta public.empresas e NÃO autentica ninguém. A validação
+   real acontece exclusivamente em autenticar_ecosystem().
    ═══════════════════════════════════════════════════════════════ */
 function resolverEmpresaDaURL(){
   try{
@@ -636,7 +644,7 @@ function resolverEmpresaDaURL(){
   }catch(e){ console.warn('[YALOG ECOSYSTEM] exceção ao preencher empresa da URL (não afeta o login normal):', e); }
 }
 
-console.log('[ECOSYSTEM] build: SSO-004-CIRURGICO (resolverEmpresaDaURL 100% visual, sem consulta ao Supabase)');
+console.log('[ECOSYSTEM] build: AUTH-RLS-SSO-FINAL (session_token + RPCs de autenticação/handoff)');
 (async function bootEcosystem(){
   await tentarRestaurarSessao();
   if(!SESSAO){
