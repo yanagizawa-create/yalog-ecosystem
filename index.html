@@ -576,8 +576,20 @@ async function tentarRestaurarSessao(){
   await garantirAuthAnonima();
   await registrarInstalacaoEcosystem(sessaoSalva.companyId);
 
-  const {data:empresas} = await supabaseClient.from('empresas').select('*').eq('company_id',sessaoSalva.companyId);
-  const {data:usuarios} = await supabaseClient.from('usuarios').select('*').eq('company_id',sessaoSalva.companyId).eq('login',sessaoSalva.login);
+  const {data:empresas, error:erroEmpresa} = await supabaseClient.from('empresas').select('*').eq('company_id',sessaoSalva.companyId);
+  const {data:usuarios, error:erroUsuario} = await supabaseClient.from('usuarios').select('*').eq('company_id',sessaoSalva.companyId).eq('login',sessaoSalva.login);
+
+  // item 6: erro de consulta (rede instável, timeout, etc.) NUNCA apaga
+  // a sessão salva — só uma resposta conclusiva (sem erro) dizendo que
+  // empresa/usuário realmente não confirmam é que justifica logout.
+  if(erroEmpresa || erroUsuario){
+    console.warn('[YALOG ECOSYSTEM] falha ao revalidar sessão (erro de consulta, não de autorização) — mantendo sessão salva, tentando novamente depois:', erroEmpresa||erroUsuario);
+    authLoading=false;
+    _mostrarTelaLogin();
+    if(statusEl) statusEl.textContent='não foi possível revalidar a sessão agora — tente novamente';
+    return;
+  }
+
   const empresaOk = empresas && empresas.length && empresas[0].ativo!==false;
   const usuarioOk = usuarios && usuarios.length && usuarios[0].ativo!==false;
   if(!empresaOk || !usuarioOk){
@@ -607,52 +619,29 @@ async function tentarRestaurarSessao(){
    (validarLoginCliente, abaixo) faz sua própria validação completa e
    independente; nada aqui autentica ou autoriza sozinho.
    ═══════════════════════════════════════════════════════════════ */
-async function resolverEmpresaDaURL(){
+function resolverEmpresaDaURL(){
   try{
     const params = new URLSearchParams(window.location.search);
     const empresaDaURL = params.get('empresa');
     if(!empresaDaURL) return;
     const companyId = empresaDaURL.toUpperCase().replace(/\s/g,'');
     const campo = document.getElementById('inCompanyId');
-    if(campo) campo.value = companyId;
-
-    if(!SUPABASE_ONLINE) await testarConexao();
-    if(!SUPABASE_ONLINE || !supabaseClient) return; // sem rede: deixa só pré-preenchido, não trava o formulário
-
-    // CORREÇÃO: nunca mais restritiva que validarLoginCliente() (que já
-    // funciona). Antes filtrava .eq('ativo', true) no banco — no
-    // Postgres isso exclui qualquer linha com ativo=null, diferente de
-    // false. O login real busca só por company_id e decide no
-    // JavaScript (`ativo===false`), tratando null/undefined como
-    // "passa". A resolução pela URL agora segue exatamente o mesmo
-    // critério, em vez de um mais rígido.
-    const {data, error} = await supabaseClient.from('empresas')
-      .select('*').eq('company_id', companyId);
-    console.log('[ECOSYSTEM] resolverEmpresaDaURL — company_id buscado:', companyId, '| resultado:', data, '| erro:', error);
-    if(error){
-      console.warn('[YALOG ECOSYSTEM] falha ao resolver empresa da URL:', error.message);
-      return;
+    if(campo){
+      campo.value = companyId;
+      campo.readOnly = true;
+      campo.style.opacity = '0.7';
     }
-    if(!data || !data.length){
-      mostrarErroLogin('Empresa não encontrada ou inativa.');
-      return;
-    }
-    const empresa = data[0];
-    if(empresa.ativo === false){
-      mostrarErroLogin('Empresa não encontrada ou inativa.');
-      return;
-    }
-    // Encontrada e não desativada (item 1/3): trava o campo, não exige redigitar.
-    if(campo){ campo.readOnly = true; campo.style.opacity = '0.7'; }
     const campoUsuario = document.getElementById('inUsuario');
     if(campoUsuario) campoUsuario.focus();
-  }catch(e){ console.warn('[YALOG ECOSYSTEM] exceção ao resolver empresa da URL (não afeta o login normal):', e); }
+  }catch(e){ console.warn('[YALOG ECOSYSTEM] exceção ao preencher empresa da URL (não afeta o login normal):', e); }
 }
 
-console.log('[ECOSYSTEM] build: SSO-003-DEFINITIVO (localStorage, sem alert(), handoff)');
+console.log('[ECOSYSTEM] build: SSO-004-CIRURGICO (resolverEmpresaDaURL 100% visual, sem consulta ao Supabase)');
 (async function bootEcosystem(){
-  await resolverEmpresaDaURL();
   await tentarRestaurarSessao();
+  if(!SESSAO){
+    resolverEmpresaDaURL();
+  }
 })();
 </script>
 </body>
