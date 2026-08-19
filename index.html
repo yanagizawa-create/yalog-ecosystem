@@ -484,34 +484,53 @@ async function tentarRestaurarSessao(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SPRINT YALOG-ECOSYSTEM-003, item 4/6 — LINK EXCLUSIVO POR EMPRESA
+   SPRINT YALOG-ECOSYSTEM-006, item 1/2/3 — RESOLUÇÃO REAL DA
+   EMPRESA PELA URL (substitui o pré-preenchimento simples da
+   ECOSYSTEM-003, que nunca consultava o Supabase)
    ═══════════════════════════════════════════════════════════════
-   O "endereço exclusivo" da ALLAS (ou de qualquer empresa) é este
-   MESMO arquivo, com ?empresa=YLG-XXXXXX na URL — nunca um arquivo
-   separado por cliente (item "não criar segunda plataforma"). Isso
-   só PRÉ-PREENCHE o campo Company ID, como conveniência de UX — nunca
-   autentica nem autoriza nada sozinho. O acesso de verdade continua
-   exigindo login+senha reais, validados no Supabase exatamente como
-   já acontecia (item 16/18: nunca confiar em URL/localStorage/JS para
-   autorização). Se o usuário tentar entrar com outra empresa, o campo
-   é só um valor de formulário como outro qualquer — sem nenhum
-   privilégio especial por ter vindo da URL.
+   Lê ?empresa= da URL, resolve contra public.empresas usando
+   EXATAMENTE .eq('company_id',...).eq('ativo',true) — a tabela não
+   tem coluna `status`; o campo real de controle de atividade é
+   `ativo`. Se resolver: trava o campo (read-only, item 3) e foca
+   direto no usuário — não exige redigitar o Company ID. Se não
+   resolver: mostra "Empresa não encontrada ou inativa." na tela de
+   login, sem travar nada. Isso continua sendo só UX — o login em si
+   (validarLoginCliente, abaixo) faz sua própria validação completa e
+   independente; nada aqui autentica ou autoriza sozinho.
    ═══════════════════════════════════════════════════════════════ */
-(function preencherEmpresaDaURL(){
+async function resolverEmpresaDaURL(){
   try{
     const params = new URLSearchParams(window.location.search);
     const empresaDaURL = params.get('empresa');
-    if(empresaDaURL){
-      const campo = document.getElementById('inCompanyId');
-      if(campo){
-        campo.value = empresaDaURL.toUpperCase().replace(/\s/g,'');
-        document.getElementById('inUsuario').focus();
-      }
-    }
-  }catch(e){ console.warn('[YALOG ECOSYSTEM] falha ao ler link exclusivo da URL (não afeta o login normal):', e); }
-})();
+    if(!empresaDaURL) return;
+    const companyId = empresaDaURL.toUpperCase().replace(/\s/g,'');
+    const campo = document.getElementById('inCompanyId');
+    if(campo) campo.value = companyId;
 
-tentarRestaurarSessao();
+    if(!SUPABASE_ONLINE) await testarConexao();
+    if(!SUPABASE_ONLINE || !supabaseClient) return; // sem rede: deixa só pré-preenchido, não trava o formulário
+
+    const {data, error} = await supabaseClient.from('empresas')
+      .select('*').eq('company_id', companyId).eq('ativo', true);
+    if(error){
+      console.warn('[YALOG ECOSYSTEM] falha ao resolver empresa da URL:', error.message);
+      return;
+    }
+    if(!data || !data.length){
+      mostrarErroLogin('Empresa não encontrada ou inativa.');
+      return;
+    }
+    // Encontrada e ativa (item 3): trava o campo, não exige redigitar.
+    if(campo){ campo.readOnly = true; campo.style.opacity = '0.7'; }
+    const campoUsuario = document.getElementById('inUsuario');
+    if(campoUsuario) campoUsuario.focus();
+  }catch(e){ console.warn('[YALOG ECOSYSTEM] exceção ao resolver empresa da URL (não afeta o login normal):', e); }
+}
+
+(async function bootEcosystem(){
+  await resolverEmpresaDaURL();
+  await tentarRestaurarSessao();
+})();
 </script>
 </body>
 </html>
