@@ -261,11 +261,12 @@ async function logCliente(tipo, detalhe, companyId){
    empresas/usuarios no login. Sob RLS real, essas tabelas não são
    mais legíveis pelo anon/authenticated sem vínculo prévio — a
    validação inteira (empresa, usuário, senha, licença) agora
-   acontece dentro de autenticar_ecosystem(), SECURITY DEFINER,
-   que só então cria o vínculo em company_installations. O antigo
-   validarLoginCliente() foi removido — não existe mais nada
-   consultando empresas/usuarios diretamente do cliente antes de
-   autenticar.
+   acontece dentro de autenticar_ecosystem(), SECURITY DEFINER, que
+   só então cria a sessão em ecosystem_sessions e devolve um
+   session_token opaco — é esse token, não mais company_id/login
+   soltos, que autoriza toda chamada seguinte (revalidação, catálogo
+   de módulos, handoff). Não existe mais nada consultando
+   empresas/usuarios diretamente do cliente antes de autenticar.
    ═══════════════════════════════════════════════════════════════ */
 
 /* ═══════════════════════════════════════════════════════════════
@@ -394,29 +395,36 @@ async function renderMeusModulos(){
     return;
   }
   // item 19: renderização 100% orientada a dados — nenhum if por
-  // module_id. item "execution_url": módulo sem URL publicada
-  // continua aparecendo (nunca escondido) — só o botão muda de texto
-  // e, ao clicar, informa exatamente a situação, sem navegar.
+  // module_id. item 3/7 (SPRINT SSO-006): o módulo aparece sempre
+  // que a EMPRESA o possui — acesso_autorizado é uma informação
+  // separada, nunca um filtro. Sem autorização individual: botão
+  // "Sem Permissão", desabilitado, nunca gera handoff.
   grid.innerHTML=r.modulos.map(m=>{
-    const disponivel = !!m.execution_url;
+    const semUrl = !m.execution_url;
+    const autorizado = m.acesso_autorizado===true;
+    let label, classe, desabilitado;
+    if(!autorizado){ label='Sem Permissão'; classe='btn-outline'; desabilitado=true; }
+    else if(semUrl){ label='Ainda não disponível'; classe='btn-outline'; desabilitado=false; }
+    else{ label='Acessar'; classe='btn-primary'; desabilitado=false; }
     return `
     <div class="mod-card">
       <div class="mod-icon">${m.icon||'🧩'}</div>
       <div class="mod-nome">${m.short_name||m.name}</div>
       <div class="mod-desc">${m.description||''}</div>
       <div class="mod-versao">v${m.version||'1.0.0'}</div>
-      <button class="btn ${disponivel?'btn-primary':'btn-outline'} btn-block" id="btnAcessar-${m.module_id}" onclick="acessarModulo('${m.module_id}')">${disponivel?'Acessar':'Ainda não disponível'}</button>
+      <button class="btn ${classe} btn-block" id="btnAcessar-${m.module_id}" ${desabilitado?'disabled':''} onclick="acessarModulo('${m.module_id}')">${label}</button>
     </div>
   `;}).join('');
   console.log('[ECOSYSTEM] módulos renderizados:', r.modulos);
 }
 
-// item 20/21/22 (sprints anteriores) + "ACESSAR MÓDULO" desta sprint:
-// revalida TUDO de novo, na hora do clique — o botão de "Acessar"
-// agora gera um handoff de uso único via gerar_handoff_modulo() em
-// vez de navegar direto para execution_url. A autorização individual
-// (usuário×módulo, não só empresa×módulo) é decidida inteiramente no
-// banco, dentro dessa RPC — nunca no frontend.
+// item 20/21/22 (sprints anteriores) + item 8/9 desta sprint: revalida
+// TUDO de novo, na hora do clique — o botão de "Acessar" gera um
+// handoff de uso único via gerar_handoff_modulo(). A autorização
+// individual (usuário×módulo, não só empresa×módulo) é decidida
+// inteiramente no banco, dentro dessa RPC — nunca no frontend. O
+// bloqueio abaixo (acesso_autorizado local) é só defesa em
+// profundidade de UX — a RPC recusaria de qualquer forma.
 async function acessarModulo(moduleId){
   const restaurar=_protegerBotao('btnAcessar-'+moduleId, 'Verificando...');
   try{
@@ -425,6 +433,13 @@ async function acessarModulo(moduleId){
     if(!modulo){
       mostrarMensagem('Seu acesso a este módulo não está disponível.');
       await renderMeusModulos(); // reflete o estado real (some da tela se foi bloqueado)
+      return;
+    }
+    if(modulo.acesso_autorizado!==true){
+      // item 6/7: empresa possui o módulo, mas ESTE usuário não tem
+      // autorização individual — modal específico, nunca a tela de
+      // login do módulo, nunca gera handoff.
+      mostrarModalAcessoNaoAutorizado();
       return;
     }
     if(!modulo.execution_url){
@@ -440,14 +455,14 @@ async function acessarModulo(moduleId){
       return;
     }
     if(!token){
-      // item 6: empresa possui o módulo, mas ESTE usuário não tem
-      // autorização individual — modal específico, nunca a tela de
-      // login do módulo.
+      // O backend é sempre a autoridade final — se ele recusar mesmo
+      // com acesso_autorizado local dizendo true (ex.: revogado entre
+      // o carregamento da lista e o clique), o mesmo modal se aplica.
       mostrarModalAcessoNaoAutorizado();
       return;
     }
     await logCliente('MODULO_ACESSADO','company_id='+SESSAO.companyId+' modulo='+moduleId, SESSAO.companyId);
-    // item 2/23: mesma aba; o módulo recebe só o token (uso único,
+    // item 9: mesma aba; o módulo recebe só o token (uso único,
     // expira em minutos), nunca senha, nunca company_id/login "soltos"
     // como prova de identidade — o módulo valida o token no Supabase
     // antes de estabelecer sua própria sessão.
@@ -466,8 +481,15 @@ async function logoutCliente(){
   const restaurar=_protegerBotao('btnSair','Saindo...');
   try{
     await logCliente('CLIENTE_LOGOUT','company_id='+(SESSAO&&SESSAO.companyId)+' login='+(SESSAO&&SESSAO.login), SESSAO&&SESSAO.companyId);
-    // Sem Supabase Auth: o Ecosystem encerra sua própria sessão removendo o token local.
-  }catch(e){ console.warn('[YALOG ECOSYSTEM] erro no signOut:', e); }
+    // item 25/TESTE 12: revoga a sessão no servidor, não só remove o
+    // token local — um session_token revogado nunca mais passa em
+    // revalidar_sessao_ecosystem, mesmo que alguém ainda tenha o
+    // valor salvo em algum lugar.
+    if(SESSAO && SESSAO.sessionToken && supabaseClient){
+      const {error} = await supabaseClient.rpc('revogar_sessao_ecosystem', { p_session_token: SESSAO.sessionToken });
+      if(error) console.warn('[ECOSYSTEM] falha ao revogar sessão no servidor (sessão local removida mesmo assim):', error);
+    }
+  }catch(e){ console.warn('[YALOG ECOSYSTEM] erro no logout:', e); }
   localStorage.removeItem(SESSAO_KEY);
   SESSAO=null;
   document.getElementById('app').style.display='none';
@@ -590,15 +612,15 @@ async function tentarRestaurarSessao(){
    EMPRESA PELA URL (substitui o pré-preenchimento simples da
    ECOSYSTEM-003, que nunca consultava o Supabase)
    ═══════════════════════════════════════════════════════════════
-   Lê ?empresa= da URL, resolve contra public.empresas usando
-   EXATAMENTE .eq('company_id',...).eq('ativo',true) — a tabela não
-   tem coluna `status`; o campo real de controle de atividade é
-   `ativo`. Se resolver: trava o campo (read-only, item 3) e foca
-   direto no usuário — não exige redigitar o Company ID. Se não
-   resolver: mostra "Empresa não encontrada ou inativa." na tela de
-   login, sem travar nada. Isso continua sendo só UX — o login em si
-   (validarLoginCliente, abaixo) faz sua própria validação completa e
-   independente; nada aqui autentica ou autoriza sozinho.
+   Lê ?empresa= da URL e SÓ preenche/trava o campo Company ID
+   visualmente — não consulta mais o Supabase aqui (correção
+   cirúrgica: sob RLS real, e com a autenticação centralizada em
+   autenticar_ecosystem(), não faz sentido validar a empresa duas
+   vezes). Se resolver: trava o campo (read-only, item 3) e foca
+   direto no usuário — não exige redigitar o Company ID. A validação
+   real (empresa/usuário/senha/licença) acontece inteiramente dentro
+   de fazerLoginCliente() → autenticar_ecosystem(); nada aqui
+   autentica ou autoriza sozinho.
    ═══════════════════════════════════════════════════════════════ */
 function resolverEmpresaDaURL(){
   try{
@@ -617,7 +639,7 @@ function resolverEmpresaDaURL(){
   }catch(e){ console.warn('[YALOG ECOSYSTEM] exceção ao preencher empresa da URL (não afeta o login normal):', e); }
 }
 
-console.log('[ECOSYSTEM] build: AUTH-RLS-SSO-SESSION-TOKEN-SESSION-TOKEN (RPCs de autenticação/revalidação/handoff)');
+console.log('[ECOSYSTEM] build: SSO-006-CONSOLIDACAO (acesso_autorizado no catálogo, logout revoga sessão no servidor)');
 (async function bootEcosystem(){
   await tentarRestaurarSessao();
   if(!SESSAO){
